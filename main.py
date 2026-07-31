@@ -1,70 +1,62 @@
 import asyncio
+import threading
 import logging
-from core.events import TelemetryReceivedEvent, AlertRaisedEvent, HeartbeatEvent
-from core.event_bus import default_bus
 from core.loop import EngineLoop
+from core.state import StateStore
 from sources.heartbeat import HeartbeatSource
 from sources.telemetry_file import TelemetryFileSource
 from sources.alerts_api import AlertsApiSource
+from ui.app import PulseDeskApp
+from ui.bridge import UIBridge
 
-# Configuración de logs con formato limpio
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S"
-)
+# Configuración básica de logs
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-# Handlers (Manejadores de eventos suscritos al bus)
-def on_telemetry(event: TelemetryReceivedEvent) -> None:
-    logging.info(
-        f"[UI-TELEMETRIA] {event.vehicle_id} ➔ Vel: {event.speed} km/h | "
-        f"Fuel: {event.fuel_level}% | Temp: {event.temperature}°C"
-    )
+def run_async_engine(loop: asyncio.AbstractEventLoop, engine: EngineLoop):
+    """Ejecuta el loop asíncrono en un hilo secundario para no congelar la GUI."""
+    asyncio.set_event_loop(loop)
+
+    hb_source = HeartbeatSource(interval=1.0)
+    telemetry_source = TelemetryFileSource(interval=1.5)
+    alerts_source = AlertsApiSource(interval=2.5)
+
+    async def start_sources():
+        await engine.start()
+        engine.create_task(hb_source.start())
+        engine.create_task(telemetry_source.start())
+        engine.create_task(alerts_source.start())
+
+    loop.run_until_complete(start_sources())
+    loop.run_forever()
 
 
-def on_alert(event: AlertRaisedEvent) -> None:
-    logging.info(f"[UI-ALERTAS] [{event.severity}] {event.alert_id}: {event.message} ({event.source_name})")
+def main():
+    logging.info("🚀 Iniciando PULSEDESK RAD Control Center...")
 
+    # 1. Instanciar el estado y la interfaz gráfica
+    state_store = StateStore()
+    app = PulseDeskApp()
+    bridge = UIBridge(app)
 
-def on_heartbeat(event: HeartbeatEvent) -> None:
-    logging.info(f"[UI-STATUS] Heartbeat #{event.sequence} recibido - Estado: {event.system_status}")
-
-
-async def main() -> None:
+    # 2. Crear y arrancar el Event Loop asíncrono en un hilo secundario (background)
+    async_loop = asyncio.new_event_loop()
     engine = EngineLoop()
 
-    # 1. Suscribir los handlers al EventBus (Totalmente desacoplado)
-    default_bus.subscribe(TelemetryReceivedEvent, on_telemetry)
-    default_bus.subscribe(AlertRaisedEvent, on_alert)
-    default_bus.subscribe(HeartbeatEvent, on_heartbeat)
+    engine_thread = threading.Thread(
+        target=run_async_engine,
+        args=(async_loop, engine),
+        daemon=True
+    )
+    engine_thread.start()
 
-    # 2. Instanciar las fuentes Pub/Sub
-    hb_source = HeartbeatSource(interval=1.0)
-    telemetry_source = TelemetryFileSource(interval=1.2)
-    alerts_source = AlertsApiSource(interval=2.0)
-
-    # 3. Arrancar el Event Loop
-    await engine.start()
-
-    # 4. Registrar la ejecución de las fuentes como tareas en el loop
-    engine.create_task(hb_source.start())
-    engine.create_task(telemetry_source.start())
-    engine.create_task(alerts_source.start())
-
-    # Simular ejecución activa durante 4.5 segundos
-    await asyncio.sleep(4.5)
-
-    # 5. Apagado limpio de fuentes y del motor
-    logging.info("Deteniendo fuentes de datos asíncronas...")
-    await hb_source.stop()
-    await telemetry_source.stop()
-    await alerts_source.stop()
-    await engine.stop()
+    # 3. Arrancar la ventana visual en el hilo principal
+    try:
+        app.mainloop()
+    finally:
+        logging.info("🛑 Cerrando aplicación y deteniendo tareas asíncronas...")
+        async_loop.call_soon_threadsafe(async_loop.stop)
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logging.info("Programa interrumpido manualmente por el usuario.")
+    main()
