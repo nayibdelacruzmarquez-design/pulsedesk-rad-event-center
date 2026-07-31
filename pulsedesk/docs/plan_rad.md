@@ -45,3 +45,16 @@
 | **TB8** | Testing & Profiling | Validar cobertura y medir rendimiento. | `tests/`, `tools/` | $\ge 15$ pruebas en verde y reporte de optimización. |
 | **TB9** | Empaquetado & Demo | Consolidar entrega, ejecutable y documentación. | `pyproject.toml`, `README.md` | Aplicación ejecutable mediante un solo comando. |
 | **TB9** | Empaquetado & Demo | Consolidar entrega, ejecutable y documentación. | `pyproject.toml`, `README.md` | Aplicación ejecutable mediante un solo comando. |
+
+---
+
+## 3. Catálogo de Eventos y Matriz de Comunicación
+
+| Evento (`Dataclass`) | Emisor (Producer) | Consumidor (Consumer) | Payload Principal |
+| :--- | :--- | :--- | :--- |
+| `TelemetryReceivedEvent` | `TelemetryFileSource` | `TelemetryPanel`, `StateStore` | `vehicle_id`, `speed`, `fuel_level`, `temperature` |
+| `AlertRaisedEvent` | `AlertsApiSource` | `AlertsPanel`, `StateStore` | `alert_id`, `severity`, `message`, `source_name` |
+| `SourceFailedEvent` | Fuentes de Datos (`sources/`) | `StatusPanel`, `LoggerWorker` | `source_name`, `error_message` |
+| `StateChangedEvent` | `StateStore` | `UIBridge` $\to$ Componentes UI | `key`, `old_value`, `new_value` |
+| `HeartbeatEvent` | `HeartbeatSource` | `StatusPanel`, `EngineLoop` | `sequence`, `system_status` |
+| `ShutdownRequestedEvent` | App UI / `EngineLoop` | Todos los servicios activos | `reason` |
